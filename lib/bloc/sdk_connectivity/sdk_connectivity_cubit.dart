@@ -1,0 +1,142 @@
+import 'dart:async';
+
+import 'package:bip39/bip39.dart';
+import 'package:bitwit_shit/app_config.dart';
+import 'package:bitwit_shit/services/breez_sdk_liquid.dart';
+import 'package:bitwit_shit/services/credentials_manager.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_breez_liquid/flutter_breez_liquid.dart';
+import 'package:logging/logging.dart';
+
+import 'sdk_connectivity_state.dart';
+import 'sync_manager.dart';
+
+final Logger _logger = Logger('SdkConnectivityCubit');
+
+class SdkConnectivityCubit extends Cubit<SdkConnectivityState> {
+  final CredentialsManager credentialsManager;
+  final BreezSDKLiquid breezSdkLiquid;
+
+  SdkConnectivityCubit({
+    required this.credentialsManager,
+    required this.breezSdkLiquid,
+  }) : super(SdkConnectivityState.disconnected);
+
+  Future<void> register() async {
+    _logger.info('Registering a new wallet.');
+    final String mnemonic = generateMnemonic();
+    // final String mnemonic =
+    //     'casino time minor vital grab lady liar athlete hub gym average season';
+    await _connect(mnemonic, storeMnemonic: true);
+  }
+
+  Future<void> restore({required String mnemonic}) async {
+    _logger.info('Restoring wallet.');
+    await _connect(mnemonic, storeMnemonic: true);
+  }
+
+  Future<void> _connect(String mnemonic, {bool storeMnemonic = false}) async {
+    try {
+      emit(SdkConnectivityState.connecting);
+      _logger.info('Retrieving SDK configuration...');
+      final Config sdkConfig = (await AppConfig.instance()).sdkConfig;
+      _logger.info('SDK configuration retrieved successfully.');
+
+      final ConnectRequest req = ConnectRequest(
+        mnemonic: mnemonic,
+        config: sdkConfig,
+      );
+      _logger.info(
+        'Using the provided mnemonic and SDK configuration to connect to Breez SDK - Liquid.',
+      );
+      await breezSdkLiquid.connect(req: req);
+      _logger.info('Successfully connected to Breez SDK - Liquid.');
+
+      _startSyncing();
+
+      await _storeBreezApiKey(sdkConfig.breezApiKey);
+      if (storeMnemonic) {
+        await credentialsManager.storeMnemonic(mnemonic: mnemonic);
+        _logger.info('Stored mnemonic: $mnemonic');
+      }
+
+      emit(SdkConnectivityState.connected);
+    } catch (e) {
+      _logger.warning('Failed to connect to Breez SDK - Liquid. Reason: $e');
+      if (storeMnemonic) {
+        _clearStoredCredentials();
+      }
+      emit(SdkConnectivityState.disconnected);
+      rethrow;
+    }
+  }
+
+  Future<void> _storeBreezApiKey(String? breezApiKey) async {
+    final String? storedBreezApiKey =
+        await credentialsManager.restoreBreezApiKey();
+    if (breezApiKey != null &&
+        breezApiKey.isNotEmpty &&
+        storedBreezApiKey != breezApiKey) {
+      await credentialsManager.storeBreezApiKey(breezApiKey: breezApiKey);
+    }
+  }
+
+  Future<void> _clearStoredCredentials() async {
+    _logger.info('Clearing stored credentials.');
+    await credentialsManager.deleteBreezApiKey();
+    await credentialsManager.deleteMnemonic();
+    _logger.info('Successfully cleared stored credentials.');
+  }
+
+  void _startSyncing() {
+    final SyncManager syncManager = SyncManager(breezSdkLiquid.instance);
+    syncManager.startSyncing();
+  }
+
+  Future<void> reconnect({String? mnemonic}) async {
+    _logger.info(
+      mnemonic == null ? 'Attempting to reconnect.' : 'Reconnecting.',
+    );
+    try {
+      final String? restoredMnemonic =
+          mnemonic ?? await credentialsManager.restoreMnemonic();
+      if (restoredMnemonic != null) {
+        await _connect(restoredMnemonic);
+      } else {
+        _logger.warning('Failed to restore mnemonics.');
+        throw Exception('Failed to restore mnemonics.');
+      }
+    } catch (e) {
+      _logger.warning(
+        'Failed to reconnect. Retrying when network connection is detected.',
+      );
+      await _retryUntilConnected();
+    }
+  }
+
+  Future<void> _retryUntilConnected() async {
+    _logger.info('Subscribing to network events.');
+    StreamSubscription<List<ConnectivityResult>>? subscription;
+    subscription = Connectivity().onConnectivityChanged.listen((
+      List<ConnectivityResult> event,
+    ) async {
+      final bool hasNetworkConnection =
+          !(event.contains(ConnectivityResult.none) ||
+              event.every(
+                (ConnectivityResult result) => result == ConnectivityResult.vpn,
+              ));
+      // Attempt to reconnect when internet is back.
+      if (hasNetworkConnection && state == SdkConnectivityState.disconnected) {
+        _logger.info('Network connection detected.');
+        await reconnect();
+        if (state == SdkConnectivityState.connected) {
+          _logger.info(
+            'SDK has reconnected. Unsubscribing from network events.',
+          );
+          subscription!.cancel();
+        }
+      }
+    });
+  }
+}
