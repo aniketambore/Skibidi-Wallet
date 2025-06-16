@@ -6,7 +6,7 @@ The first brainrot Bitcoin wallet for Gen Alpha — where memes, gaming, and Bit
 
 ## 🎬 Demo Video
 
-![Watch the demo](ReadME/screenshot.png)
+![Watch the demo](https://raw.githubusercontent.com/aniketambore/Skibidi-Wallet/refs/heads/main/README/screenshot.png)
 
 [Watch on YouTube](https://youtu.be/f3_48Ebe-vs?si=TPb7IvdEZC8m0HXg)
 
