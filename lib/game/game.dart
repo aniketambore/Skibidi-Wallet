@@ -25,9 +25,9 @@ class GameController extends GameComponent {
   bool _showMnemonicDialog = false;
   List<String>? _pendingMnemonic;
   bool _isFirstHalf = true;
-  bool _hasShownFirstHalf = false;
   bool showGameOver = false;
   final AudioService _audioService;
+  bool _hasKilledFirstEnemy = false;
 
   GameController(this._audioService);
 
@@ -43,14 +43,14 @@ class GameController extends GameComponent {
 
     final List<String> mnemonicWords = accountMnemonic.split(' ');
 
-    // Only show first half if it hasn't been shown yet
-    if (isFirstHalf && !_hasShownFirstHalf) {
+    // If this is the first enemy killed
+    if (!_hasKilledFirstEnemy) {
       _pendingMnemonic = mnemonicWords.sublist(0, 6);
       _showMnemonicDialog = true;
-      _hasShownFirstHalf = true;
+      _hasKilledFirstEnemy = true;
     }
-    // Only show second half if first half has been shown
-    else if (!isFirstHalf && _hasShownFirstHalf) {
+    // If this is the second enemy killed
+    else if (_hasKilledFirstEnemy) {
       _pendingMnemonic = mnemonicWords.sublist(6, 12);
       _showMnemonicDialog = true;
     }
